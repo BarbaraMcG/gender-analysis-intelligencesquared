@@ -1,0 +1,207 @@
+---
+title: "Data analysis of Intelligence Squared events"
+output: html_document
+---
+
+
+# Data analysis on gender distribution among speakers and chairs in Intelligence Squared events from the beginning to 23/03/2015
+
+## Initialization
+
+Load libraries
+
+```{r load libraries}
+library(gdata)
+library(lattice)
+library(vcd)
+library(reshape2)
+library(dplyr)
+```
+
+Read input file:
+
+```{r}
+df = read.xls("U:\\my research\\Gender equality\\Intelligence Squared\\data\\dataset_25012016.xlsx", sheet = "edited", header = TRUE, colClasses = c("Date", "character", "character", "character", "character", "factor", "factor", "factor", "factor", "factor", "factor", "factor"))
+#df[,"date"] = as.Date(df[,"date"], format="%Y-%m-%d")
+# number of male/female speakers/chairs:
+df[,2:5] = sapply(df[,2:5], as.numeric) 
+# binary topic variables:
+df[7:ncol(df)] = lapply(df[,7:ncol(df)], function(x) x <- sub("^$", 0,x)) 
+df[,7:ncol(df)] = sapply(sapply(df[,7:ncol(df)], as.numeric), as.logical)
+```
+
+
+Convert dataset into dataframe so that each row corresponds to a person:
+
+```{r}
+df$ID = as.factor(rownames(df))
+df1 = melt(df[,(colnames(df) %in% c("date", "female.speakers", "male.speakers","female.chair","male.chair","ID"))], id=c("ID", "date"))
+df1$gender = as.factor(ifelse(grepl("f.",df1$variable),"female", "male"))
+df1$type = as.factor(ifelse(grepl(".sp",df1$variable),"speaker", "chair"))
+df1$ID = as.factor(df1$ID)
+df2 = df1[df1$value>0,]
+colnames(df2)[colnames(df2)=="value"] = "freq"
+df2$ID = as.factor(df2$ID)
+head(df2)
+```
+
+Overview of dataset:
+
+```{r}
+summary(df)
+plot(df)
+summary(df2)
+plot(df2)
+```
+
+## Measures of gender balance
+
+Define the (proportional) difference between female and male speakers in each event: 
+
+```{r}
+df$gender_difference = df$male.speakers-df$female.speakers
+summary(df$gender_difference)
+table(df$gender_difference)
+table(sign(df$gender_difference))
+prop.table(table(sign(df$gender_difference)))
+hist(df$gender_difference, main = "Difference in number of males vs. females per event", xlab = "Difference (absolute values)", col = "grey")
+df$gender_ratio = ifelse(df$female.speakers == 0, 0, round(df$male.speakers/df$female.speakers,2))
+summary(df$gender_ratio)
+hist(df$gender_ratio, main = "Ratio of males vs. females per event", xlab = "Ratio", col = "grey")
+table(df$gender_ratio)
+table(sign(df$gender_ratio))
+```
+
+### Total number of women over all people
+
+Number of female speakers/chairs and male speakers/chairs:
+
+```{r}
+gender.type = xtabs(freq ~ gender + type, data = df2)
+barplot(gender.type, legend=T, main = "Total number of speakers and chairs by gender")
+boxplot(freq ~ gender, data = df2)
+boxplot(freq ~ gender+type, data = df2)
+```
+
+
+```{r}
+rowSums(gender.type)[1]/sum(gender.type)
+```
+
+Of all people (speakers + chairs), `r rowSums(gender.type)[1]` (`r 100*round(rowSums(gender.type)[1]/sum(gender.type),2)`%) are women and `r rowSums(gender.type)[2]` (`r 100*round(rowSums(gender.type)[2]/sum(gender.type),2)`%) are men.
+
+### Gender distribution by type
+
+```{r}
+(gender.type)
+prop.table(gender.type,1)
+```
+
+Of all women, `r gender.type[1,1]` (`r 100*round(prop.table(gender.type,1)[1,1],2)`%) are chairs and  `r gender.type[1,2]` (`r 100*round(prop.table(gender.type,1)[1,2],2)`%) are speakers; of all men, `r gender.type[2,1]` (`r 100*round(prop.table(gender.type,1)[2,1],2)`%) are chairs and `r gender.type[2,2]` (`r 100*round(prop.table(gender.type,1)[2,2],2)`%) are speakers. 
+
+```{r}
+(gender.type)
+prop.table(gender.type,2)
+```
+
+`r gender.type[1,1]` chairs are female (`r 100*round(prop.table(gender.type,2)[1,1], 2)`%) of all chairs, `r gender.type[2,1]` (`r 100*round(prop.table(gender.type,2)[2,1], 2)`%) are male; `r 100*round(prop.table(gender.type, 2)[1,2], 2)`% of speakers are female, `r 100*round(prop.table(gender.type,2)[2,2], 2)`% are male.
+
+```{r}
+prop.table(gender.type,1)
+```
+
+
+I test the null hypothesis that the proportions of females in each group (chairs and speakers) are the same:
+
+```{r}
+prop.test(gender.type[,1],gender.type[,1]+gender.type[,2])
+prop.table(gender.type,1)
+assocplot(gender.type)
+```
+
+This shows, as expected, that the proportion of female chairs is significantly lower than the proportion of male chairs.
+
+
+The same holds for speakers:
+
+
+```{r}
+prop.test(gender.type[,2],gender.type[,1]+gender.type[,2])
+prop.table(gender.type,1)
+assocplot(gender.type)
+```
+
+Is there a significant difference in the gender distribution between chairs and speakers?
+
+```{r}
+(gender.type)
+chisq.test(gender.type)
+assocstats(gender.type)
+assocplot(gender.type)
+```
+
+This shows that there is a statistically significant difference between the gender distribution of chairs and that of speakers, and the effect of this is small. 
+In other words, women are significantly under-represented among chairs and speakers, compared to men, and that the difference is larger for speakers.
+
+```{r}
+prop.test(gender.type[1,1], colSums(gender.type)[1], p=prop.table(gender.type,2)[1,2])
+```
+
+There are significantly more female chairs than would be expected given the proportion of female speakers out of all speakers.
+This can be explained by the fact that an event only needs one chair, so even if the panel of speakers is all-male, it's relatively more likely that the chair is female. 
+
+Let's check this.
+
+## All-male speakers and female chairs
+
+```{r}
+all_male_speakers = droplevels(filter(df, female.speakers == 0 & male.speakers > 0))
+all_male_speakers_chaired = droplevels(filter(all_male_speakers, male.chair==1 | female.chair==1))
+all_male_speakers_chaired_female_chair = prop.table(table(all_male_speakers_chaired$female.chair))
+all_events_chaired = droplevels(filter(df, female.chair == 1 | male.chair == 1))
+all_events_chaired_female_chair = prop.table(table(all_events_chaired$female.chair))
+all_events_chaired_male_chair = prop.table(table(all_events_chaired$male.chair))
+```
+
+There are `r nlevels(all_male_speakers$ID)` events with an all-male panel; this corresponds to `r 100*round(nlevels(all_male_speakers$ID)/nlevels(df$ID), 2)` of all events.
+Of such events, `r nlevels(all_male_speakers_chaired$ID)` have a chair.
+
+Of such chaired all-male-speaker events, `r table(all_male_speakers_chaired$female.chair)[2]` (`r 100*round(all_male_speakers_chaired_female_chair[2],2)`%) have a female chair. 
+
+Of all chaired events (`r nlevels(all_events_chaired$ID)`), `r table(all_events_chaired$female.chair)[2]` (`r 100*round(all_events_chaired_female_chair[2], 2)`%) have a female chair. 
+
+Is this difference statistically significant?
+
+```{r}
+prop.test(matrix(c(table(all_male_speakers_chaired$female.chair)[2],nlevels(all_male_speakers_chaired$ID)-table(all_male_speakers_chaired$female.chair)[2],table(all_events_chaired$female.chair)[2],nlevels(all_events_chaired$ID)-table(all_events_chaired$female.chair)[2]), nrow=2, byrow=T))
+```
+
+So, it's not true that when the speakers are all male, we're more likely to have a female chair.
+
+
+### Proportion of women 
+
+There are `r nrow(filter(df, female.speakers+female.chair>male.speakers+male.chair))` events (`r 100*round(nrow(filter(df, female.speakers+female.chair>male.speakers+male.chair))/nrow(df),2)`%) where the number of females (speakers + chairs) is higher than the number of males (speakers + chairs); `r nrow(filter(df, female.speakers+female.chair==male.speakers+male.chair))` events (`r 100*round(nrow(filter(df, female.speakers+female.chair==male.speakers+male.chair))/nrow(df),2)`%) where the number of females (speakers + chairs) is the same as the number of males (speakers + chairs); `r nrow(filter(df, female.speakers+female.chair<male.speakers+male.chair))` events (`r 100*round(nrow(filter(df, female.speakers+female.chair<male.speakers+male.chair))/nrow(df), 2)`%) where the number of females (speakers + chairs) is lower than the number of males (speakers + chairs).
+
+There are `r nrow(filter(df, female.speakers>male.speakers))` events (`r 100*round(nrow(filter(df, female.speakers>male.speakers))/nrow(df),2)`%) where the number of females (speakers) is higher than the number of males (speakers); `r nrow(filter(df, female.speakers==male.speakers))` events (`r 100*round(nrow(filter(df, female.speakers==male.speakers))/nrow(df), 2)`%) where the number of females (speakers) is the same as the number of males (speakers); `r nrow(filter(df, female.speakers<male.speakers))` events (`r 100*round(nrow(filter(df, female.speakers<male.speakers))/nrow(df),2)`%) where the number of females (speakers) is lower than the number of males (speakers).
+
+There are `r nrow(filter(df, female.chair>male.chair))` events (`r 100*round(nrow(filter(df, female.chair>male.chair))/nrow(df),2)`%) where the number of females (chairs) is higher than the number of males (chairs); `r nrow(filter(df, female.chair==male.chair))` events (`r 100*round(nrow(filter(df, female.chair==male.chair))/nrow(df),2)`%) where the number of females (chairs) is the same as the number of males (chairs); `r nrow(filter(df, female.chair<male.chair))` events (`r 100*round(nrow(filter(df, female.chair<male.chair))/nrow(df),2)`%) where the number of females (chairs) is lower than the number of males (chairs).
+
+`r nrow(filter(df, female.speakers == 0))` (`r 100*round(nrow(filter(df, female.speakers == 0))/nrow(df),2)`%) have no female speakers and `r nrow(filter(df, female.speakers == 0 & female.chair == 0))` (`r 100*round(nrow(filter(df, female.speakers == 0 & female.chair == 0))/nrow(df), 2)`%) have no female speakers or chairs.
+
+
+### All-female events
+
+```{r}
+all_female = filter(df, male.speakers == 0 & male.chair == 0)
+```
+
+
+`r nrow(filter(df, male.speakers == 0))` (`r 100*round(nrow(filter(df, male.speakers == 0))/nrow(df),2)`%) have no male speakers and `r nrow(all_female)` (`r 100*round(nrow(filter(df, male.speakers == 0 & male.chair == 0))/nrow(df), 2)`%).
+
+What are the all-female events about?
+
+```{r}
+all_female$title
+colSums(all_female[,7:12])>0
+```
